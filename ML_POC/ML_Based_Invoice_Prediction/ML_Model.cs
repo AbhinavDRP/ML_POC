@@ -5,6 +5,8 @@ using System.Linq;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Api;
 using System.IO;
+using EAGetMail;
+using System.Globalization;
 
 namespace ML_Based_Invoice_Prediction
 {
@@ -38,6 +40,16 @@ namespace ML_Based_Invoice_Prediction
     /// </summary>
     public class ML_Model
     {
+        //Save email in Guest Directory
+
+        static string _generateFileName(int sequence)
+        {
+            DateTime currentDateTime = DateTime.Now;
+            return string.Format("{0}-{1:000}-{2:000}.eml",
+                currentDateTime.ToString("yyyyMMddHHmmss", new CultureInfo("en-US")),
+                currentDateTime.Millisecond,
+                sequence);
+        }
         //List of training data points
         static List<Model_Inputs_Outputs> trainingData = new List<Model_Inputs_Outputs>();
 
@@ -101,6 +113,7 @@ namespace ML_Based_Invoice_Prediction
         /// </summary>
         public void Execute_ML_Model()
         {
+            int i = 0;
             //Loop until user chooses to exit the program
             while (true)
             {
@@ -116,7 +129,8 @@ namespace ML_Based_Invoice_Prediction
                 IDataView trainingDataView = mlContext.CreateStreamingDataView<Model_Inputs_Outputs>(trainingData);
 
                 //Define a pipeline so that model uses featurized input
-                var pipeline = mlContext.Transforms.Text.FeaturizeText("EmailSubject", "Features").Append(mlContext.BinaryClassification.Trainers.FastTree(numLeaves: 50, numTrees: 50, minDatapointsInLeaves: 1));
+                var pipeline = mlContext.Transforms.Text.FeaturizeText("EmailSubject", "Features").
+                    Append(mlContext.BinaryClassification.Trainers.FastTree(numLeaves: 50, numTrees: 50, minDatapointsInLeaves: 1));
 
                 //Input training data into the model
                 var model = pipeline.Fit(trainingDataView);
@@ -125,19 +139,86 @@ namespace ML_Based_Invoice_Prediction
                 IDataView testDataView = mlContext.CreateStreamingDataView<Model_Inputs_Outputs>(testData);
                 var predictions = model.Transform(testDataView);
                 var metrics = mlContext.BinaryClassification.Evaluate(predictions, "Label");
-                Console.WriteLine("Accuracy of the Model = " + metrics.Accuracy);
+                Console.BackgroundColor = ConsoleColor.White;
+                Console.ForegroundColor = ConsoleColor.Black;
+                Console.Title = "Machine Learning POC";
+                System.Globalization.NumberFormatInfo nfi = new System.Globalization.CultureInfo("en-US", false).NumberFormat;
+                nfi.PercentDecimalDigits = 0;
+                Console.WriteLine("Accuracy of the Model = " + metrics.Accuracy.ToString("P", nfi));
+
 
 
                 //User inputs email subject or Exit to stop run
-                Console.WriteLine("Enter an Email Subject or Enter Exit to Terminate Program : ");
-                string userInputString = Console.ReadLine();
+                //Commenting the below lines of code to retrieve email from Outlook 365 - Subrato - Start
+                //Console.WriteLine("Enter an Email Subject or Enter Exit to Terminate Program : ");
+                //Commenting the below lines of code to retrieve email from Outlook 365 - Subrato - End
+                Console.WriteLine("Enter any Key to Continue or Enter Exit to Terminate Program : ");
+                string userInputStringForExit = Console.ReadLine();
 
                 //Break loop and stop run if Exit is used
-                if (userInputString.ToLower() == "exit")
-                    break;
+                if (userInputStringForExit.ToLower() == "exit")
+                break;
+
 
                 //Use model to make prediction
-                var predictionFunction = model.MakePredictionFunction
+
+                //Outlook.Application app = new Outlook.Application();
+                //Outlook.NameSpace outlookNs = app.GetNamespace("MAPI");
+                //Outlook.MAPIFolder emailFolder = outlookNs.GetDefaultFolder(Microsoft.Office.Interop.Outlook.OlDefaultFolders.olFolderInbox);
+
+                //List<MailItem> ReceivedEmail = new List<MailItem>();
+                //foreach (Outlook.MailItem mail in emailFolder.Items)
+                //    ReceivedEmail.Add(mail);
+
+                //foreach (MailItem mail in ReceivedEmail)
+                //{
+                //    //do stuff
+                //}
+
+
+                MailServer oServer = new MailServer("imap-mail.outlook.com",
+                    "subrato.biswas@exlservice.com", "Password", ServerProtocol.Imap4);
+
+                oServer.SSLConnection = true;
+
+                // Set 993 SSL port
+                oServer.Port = 993;
+
+                MailClient oClient = new MailClient("TryIt");
+                oClient.Connect(oServer);
+
+                MailInfo[] infos = oClient.GetMailInfos();
+                Console.WriteLine("Total {0} email(s)\r\n", infos.Length);
+
+                
+                    MailInfo info = infos[i];
+                    Console.WriteLine("Index: {0}; Size: {1}; UIDL: {2}",
+                        info.Index, info.Size, info.UIDL);
+
+                    // Receive email from IMAP4 server
+                    Mail oMail = oClient.GetMail(info);
+
+                    if (oMail.From.ToString().Equals(""))
+                    {
+
+                    }
+                    string userInputString = oMail.Subject;
+
+                    // Generate an unqiue email file name based on date time.
+                    
+
+                    // Save email to local disk
+                    //oMail.SaveAs(fullPath, true);
+
+                    // Mark email as deleted from IMAP4 server.
+                    //oClient.Delete(info);
+                
+
+                // Quit and expunge emails marked as deleted from IMAP4 server.
+                
+            
+
+            var predictionFunction = model.MakePredictionFunction
                                               <Model_Inputs_Outputs, Model_Predictions>(mlContext);
 
                 Model_Inputs_Outputs inputToModel = new Model_Inputs_Outputs();
@@ -148,10 +229,10 @@ namespace ML_Based_Invoice_Prediction
 
                 //Display on terminal if email is invoice or not
                 if (invoicePrediction.IsInvoice)
-                    Console.WriteLine("According to Model, the Email with Subject " + userInputString + " is an Invoice");
+                    Console.WriteLine("This is an Invoice");
 
                 else
-                    Console.WriteLine("According to Model, the Email with Subject " + userInputString + " is NOT an Invoice");
+                    Console.WriteLine("This is NOT an Invoice");
 
                 //Add the user input subject to the training data set
                 Console.WriteLine("Was the prediction correct Y/N?");
@@ -173,8 +254,12 @@ namespace ML_Based_Invoice_Prediction
 
                 //Adding subject to training data txt file
                 File.AppendAllText(GlobalVariables.trainingDataFilePath, Environment.NewLine + addNewEmailSubject);
+
+                oClient.Quit();
             }
 
+            
+            
             //Completed Loop
             Console.WriteLine("Completed Execution.....");
         }
